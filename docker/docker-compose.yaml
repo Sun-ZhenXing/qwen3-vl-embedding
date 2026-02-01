@@ -1,0 +1,76 @@
+x-defaults: &defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 100m
+      max-file: "3"
+
+x-vllm: &vllm
+  <<: *defaults
+  image: ${GLOBAL_REGISTRY:-}vllm/vllm-openai:${VLLM_VERSION:-v0.15.0}
+  volumes:
+    - vllm_models:/root/.cache/huggingface
+    - ./models:/data/models
+    - ./template:/data/template:ro
+  environment:
+    - TZ=${TZ:-UTC}
+    - HF_TOKEN=${HF_TOKEN:-}
+  deploy:
+    resources:
+      limits:
+        cpus: ${VLLM_CPU_LIMIT:-4.0}
+        memory: ${VLLM_MEMORY_LIMIT:-8G}
+      reservations:
+        cpus: ${VLLM_CPU_RESERVATION:-2.0}
+        memory: ${VLLM_MEMORY_RESERVATION:-4G}
+        devices:
+          - driver: nvidia
+            device_ids:
+              - ${VLLM_GPU_DEVICE_ID:-0}
+            capabilities: [gpu]
+  shm_size: ${VLLM_SHM_SIZE:-4G}
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 60s
+
+services:
+  vllm-qwen3-vl-embedding:
+    <<: *vllm
+    ports:
+      - "${EMBEDDING_PORT_OVERRIDE:-8001}:8000"
+    profiles:
+      - embedding
+    command: |
+      /data/models/Qwen3-VL-Embedding-2B
+      --served-model-name Qwen3-VL-Embedding-2B
+      --host 0.0.0.0
+      --port 8000
+      --gpu-memory-utilization 0.3
+      --runner pooling
+      --max-model-len 8192
+
+  vllm-qwen3-vl-reranker:
+    <<: *vllm
+    ports:
+      - "${RERANKER_PORT_OVERRIDE:-8002}:8000"
+    profiles:
+      - reranker
+    environment:
+      - TZ=${TZ:-UTC}
+      - HF_TOKEN=${HF_TOKEN:-}
+    command: |
+      /data/models/Qwen3-VL-Reranker-2B
+      --served-model-name Qwen3-VL-Reranker-2B
+      --host 0.0.0.0
+      --port 8000
+      --gpu-memory-utilization 0.3
+      --runner pooling
+      --max-model-len 4096
+      --hf_overrides '{"architectures":["Qwen3VLForSequenceClassification"],"classifier_from_token":["no","yes"],"is_original_qwen3_reranker": true}'
+
+volumes:
+  vllm_models:
