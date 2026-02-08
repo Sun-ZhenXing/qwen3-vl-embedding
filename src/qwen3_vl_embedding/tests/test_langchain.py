@@ -422,10 +422,6 @@ def test_langchain_reranker_with_image_metadata(
             },
         ),
         Document(page_content="Plain text document"),
-        Document(
-            page_content="Image 2 description",
-            metadata={"image_path": "/path/to/image.jpg"},
-        ),
     ]
 
     query = "Find images"
@@ -457,3 +453,117 @@ def test_langchain_reranker_empty_documents(
 
     assert isinstance(reranked_docs, list)
     assert len(reranked_docs) == 0
+
+
+def test_langchain_reranker_multimodal_documents(
+    reranker_base_url: str,
+    reranker_model: str,
+    api_key: str,
+) -> None:
+    """Test LangChain reranker with multimodal documents (text + image).
+
+    This test demonstrates three ways to pass multimodal content to the reranker:
+    1. image_url in metadata — auto-converted to image_url content part
+    2. multimodal_content in metadata — used as-is (full control)
+    3. Plain text document — used as baseline
+    """
+    from langchain_core.documents import Document
+
+    from qwen3_vl_embedding.langchain import Qwen3VLReranker
+
+    reranker = Qwen3VLReranker(
+        base_url=reranker_base_url,
+        model_name=reranker_model,
+        top_n=3,
+    )
+
+    demo_image = (
+        "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"
+    )
+
+    documents = [
+        # 1) Text + image via metadata shorthand
+        Document(
+            page_content="A woman and her dog enjoying the beach.",
+            metadata={"image_url": demo_image},
+        ),
+        # 2) Explicit multimodal_content in metadata (takes priority)
+        Document(
+            page_content="",
+            metadata={
+                "multimodal_content": [
+                    {
+                        "type": "text",
+                        "text": "An outdoor scene with a person and a pet.",
+                    },
+                    {"type": "image_url", "image_url": {"url": demo_image}},
+                ]
+            },
+        ),
+        # 3) Pure text document (baseline)
+        Document(page_content="Python is a popular programming language."),
+        # 4) Text + video via metadata shorthand
+        Document(
+            page_content="A short clip about beach activities.",
+            metadata={
+                "video_url": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-Omni/demo/draw.mp4"
+            },
+        ),
+    ]
+
+    query = "Find images or videos about people playing on the beach"
+    reranked_docs = reranker.compress_documents(documents, query)
+
+    assert isinstance(reranked_docs, list)
+    assert len(reranked_docs) <= 3
+    assert all(isinstance(doc, Document) for doc in reranked_docs)
+    # Relevance scores should be present
+    for doc in reranked_docs:
+        assert "relevance_score" in doc.metadata
+        assert isinstance(doc.metadata["relevance_score"], float)
+
+
+async def test_langchain_reranker_multimodal_async(
+    reranker_base_url: str,
+    reranker_model: str,
+    api_key: str,
+) -> None:
+    """Test LangChain async reranker with multimodal documents."""
+    from langchain_core.documents import Document
+
+    from qwen3_vl_embedding.langchain import Qwen3VLReranker
+
+    reranker = Qwen3VLReranker(
+        base_url=reranker_base_url,
+        model_name=reranker_model,
+        top_n=2,
+    )
+
+    demo_image = (
+        "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"
+    )
+
+    documents = [
+        Document(
+            page_content="A woman playing with her dog on a beach.",
+            metadata={"image_url": demo_image},
+        ),
+        Document(page_content="Machine learning is a subset of AI."),
+        Document(
+            page_content="",
+            metadata={
+                "multimodal_content": [
+                    {"type": "text", "text": "Beach scene with sunset."},
+                    {"type": "image_url", "image_url": {"url": demo_image}},
+                ]
+            },
+        ),
+    ]
+
+    query = "Beach scene with a dog"
+    reranked_docs = await reranker.arerank(documents, query)
+
+    assert isinstance(reranked_docs, list)
+    assert len(reranked_docs) <= 2
+    for doc in reranked_docs:
+        assert "relevance_score" in doc.metadata

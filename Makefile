@@ -6,6 +6,10 @@ install:
 update:
 	uv sync --all-packages --all-extras -U
 
+.PHONY: lint
+lint:
+	uv run ruff check . && uv run ty check .
+
 .PHONY: test
 test:
 	uv run pytest

@@ -17,7 +17,7 @@ from qwen3_vl_embedding.client import (
     RerankerResponse,
     get_image_url,
 )
-from qwen3_vl_embedding.types import EmbeddingContentPart
+from qwen3_vl_embedding.types import DocumentList, EmbeddingContentPart, QueryType
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ class Qwen3VLReranker(BaseNodePostprocessor):
         base_url: Optional[str] = None,
         model_name: Optional[str] = None,
         top_n: Optional[int] = None,
+        api_key: Optional[str] = None,
         timeout: Optional[int] = None,
         reraise: bool = True,
     ):
@@ -51,37 +52,49 @@ class Qwen3VLReranker(BaseNodePostprocessor):
             base_url: Base URL of the rerank API
             model_name: Model name to use for reranking
             top_n: Number of top results to return after reranking
+            api_key: API key for authentication
             timeout: Timeout for API requests in seconds
             reraise: Whether to reraise exceptions on API errors
         """
         super().__init__()
-        self.base_url = base_url or self.base_url
-        self.model_name = model_name or self.model_name
-        self.top_n = top_n or self.top_n
-        self.timeout = timeout or self.timeout
+        if base_url is not None:
+            self.base_url = base_url
+        if model_name is not None:
+            self.model_name = model_name
+        if top_n is not None:
+            self.top_n = top_n
+        if api_key is not None:
+            self.api_key = api_key
+        if timeout is not None:
+            self.timeout = timeout
         self.reraise = reraise
         self._client = HttpxRerankerClient(
             base_url=self.base_url,
             api_key=self.api_key,
         )
 
-    def _prepare_documents_from_nodes(
-        self, nodes: List[NodeWithScore]
-    ) -> List[EmbeddingContentPart]:
-        """Prepare document strings from nodes.
+    def _prepare_documents_from_nodes(self, nodes: List[NodeWithScore]) -> list:
+        """Prepare documents from nodes for the reranker API.
+
+        Each node is converted to either a plain string (text-only) or a
+        ScoreMultiModalParam dict (hybrid multimodal with mixed content types).
 
         Args:
             nodes: List of nodes with scores
 
         Returns:
-            List of document contents
+            List of documents, each being a str or ScoreMultiModalParam
         """
-
-        documents: List[EmbeddingContentPart] = []
+        documents: list = []
         for node in nodes:
+            parts: List[EmbeddingContentPart] = []
             if isinstance(node.node, ImageNode):
+                # ImageNode extends TextNode, include text for hybrid support
+                text_content = node.node.get_content()
+                if text_content:
+                    parts.append({"type": "text", "text": text_content})
                 if node.node.image:
-                    documents.append(
+                    parts.append(
                         {
                             "type": "image_url",
                             "image_url": {
@@ -90,14 +103,14 @@ class Qwen3VLReranker(BaseNodePostprocessor):
                         }
                     )
                 if node.node.image_url:
-                    documents.append(
+                    parts.append(
                         {
                             "type": "image_url",
                             "image_url": {"url": node.node.image_url},
                         }
                     )
                 elif node.node.image_path:
-                    documents.append(
+                    parts.append(
                         {
                             "type": "image_url",
                             "image_url": {
@@ -107,13 +120,13 @@ class Qwen3VLReranker(BaseNodePostprocessor):
                     )
             elif isinstance(node.node, TextNode):
                 text_content = node.node.get_content()
-                documents.append({"type": "text", "text": text_content})
-                continue
+                if text_content:
+                    parts.append({"type": "text", "text": text_content})
             elif isinstance(node.node, Node):
                 if node.node.text_resource:
                     text_content = node.node.text_resource.text
                     if text_content:
-                        documents.append({"type": "text", "text": text_content})
+                        parts.append({"type": "text", "text": text_content})
                 if node.node.image_resource:
                     if node.node.image_resource.url:
                         image_url = node.node.image_resource.url.encoded_string()
@@ -122,23 +135,50 @@ class Qwen3VLReranker(BaseNodePostprocessor):
                             data=node.node.image_resource.data,
                             path=node.node.image_resource.path,
                         )
-                    documents.append(
+                    parts.append(
                         {
                             "type": "image_url",
                             "image_url": {"url": image_url},
                         }
                     )
-                continue
-            text_content = node.node.get_content()
-            if text_content:
-                documents.append({"type": "text", "text": text_content})
+                if node.node.video_resource:
+                    if node.node.video_resource.url:
+                        video_url = node.node.video_resource.url.encoded_string()
+                    else:
+                        video_url = get_image_url(
+                            data=node.node.video_resource.data,
+                            path=node.node.video_resource.path,
+                        )
+                    parts.append(
+                        {
+                            "type": "video_url",
+                            "video_url": {"url": video_url},
+                        }
+                    )
+            else:  # if other Node types, fallback to text content
+                text_content = node.node.get_content()
+                if text_content:
+                    parts.append({"type": "text", "text": text_content})
+
+            # Convert to appropriate document type
+            if len(parts) == 1 and parts[0].get("type") == "text":
+                # Text-only document: use plain string
+                text_part = parts[0]
+                documents.append(text_part["text"])  # type: ignore[typeddict-item]
+            elif parts:
+                # Multimodal or hybrid document: wrap in ScoreMultiModalParam
+                documents.append({"content": parts})
+            else:
+                # Fallback: empty text
+                documents.append("")
+
         assert len(documents) == len(nodes), "Mismatch in documents and nodes length"
         return documents
 
     def _rerank_documents(
         self,
-        query: str,
-        documents: List[EmbeddingContentPart],
+        query: QueryType,
+        documents: DocumentList,
     ) -> RerankerResponse:
         """Rerank documents based on query relevance.
 
@@ -159,8 +199,8 @@ class Qwen3VLReranker(BaseNodePostprocessor):
 
     async def _arerank_documents(
         self,
-        query: str,
-        documents: List[EmbeddingContentPart],
+        query: QueryType,
+        documents: DocumentList,
     ) -> RerankerResponse:
         """Async version of _rerank_documents."""
         return await asyncio.to_thread(
@@ -201,11 +241,13 @@ class Qwen3VLReranker(BaseNodePostprocessor):
         except Exception as e:
             logger.error(f"Error calling rerank API: {e}")
             if self.reraise:
-                raise e
+                raise
             return nodes[: self.top_n]
 
         if "results" not in result:
             logger.warning("No results in rerank response")
+            if self.reraise:
+                raise ValueError("Invalid rerank response: missing 'results'")
             return nodes[: self.top_n]
 
         # Build reranked nodes

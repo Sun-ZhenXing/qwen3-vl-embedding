@@ -3,7 +3,6 @@ from typing import (
     Any,
     Dict,
     List,
-    NotRequired,
     Optional,
     Protocol,
     TypedDict,
@@ -12,8 +11,9 @@ from typing import (
 
 import filetype
 import httpx
+from typing_extensions import NotRequired
 
-from qwen3_vl_embedding.types import EmbeddingContentPart
+from qwen3_vl_embedding.types import DocumentList, QueryType
 
 DEFAULT_IMAGE_MIME_TYPE = "image/png"
 
@@ -128,8 +128,8 @@ class RerankerClient(Protocol):
 
     def rerank(
         self,
-        query: str,
-        documents: List[EmbeddingContentPart],
+        query: QueryType,
+        documents: DocumentList,
         model: str,
         top_n: Optional[int] = None,
         return_documents: Optional[bool] = None,
@@ -227,8 +227,8 @@ class HttpxRerankerClient:
 
     def rerank(
         self,
-        query: str,
-        documents: List[EmbeddingContentPart],
+        query: QueryType,
+        documents: DocumentList,
         model: str,
         top_n: Optional[int] = None,
         return_documents: Optional[bool] = None,
@@ -245,9 +245,7 @@ class HttpxRerankerClient:
 
         body: Dict[str, Any] = {
             "query": query,
-            "documents": {
-                "content": documents,
-            },
+            "documents": documents,
             "model": model,
         }
         if top_n is not None:
