@@ -16,7 +16,7 @@ class Qwen3VLEmbeddings(BaseModel, Embeddings):
 
     Example:
         ```python
-        from python_qwen3_vl.langchain import Qwen3VLEmbeddings
+        from qwen3_vl_embedding.langchain import Qwen3VLEmbeddings
 
         embeddings = Qwen3VLEmbeddings(
             base_url="http://localhost:8000/v1",

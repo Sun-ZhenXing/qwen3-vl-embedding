@@ -20,7 +20,7 @@ class Qwen3VLReranker(BaseDocumentCompressor):
     Example:
         ```python
         from langchain_core.documents import Document
-        from python_qwen3_vl.langchain import Qwen3VLReranker
+        from qwen3_vl_embedding.langchain import Qwen3VLReranker
 
         reranker = Qwen3VLReranker(
             base_url="http://localhost:8000/v1",
@@ -228,11 +228,13 @@ class Qwen3VLReranker(BaseDocumentCompressor):
         except Exception as e:
             logger.error(f"Error calling rerank API: {e}")
             if self.reraise:
-                raise e
+                raise
             return documents[: self.top_n]
 
         if "results" not in result:
             logger.warning("No results in rerank response")
+            if self.reraise:
+                raise ValueError("Invalid rerank response: missing 'results'")
             return documents[: self.top_n]
 
         # Build reranked documents

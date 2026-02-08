@@ -42,6 +42,7 @@ class Qwen3VLReranker(BaseNodePostprocessor):
         base_url: Optional[str] = None,
         model_name: Optional[str] = None,
         top_n: Optional[int] = None,
+        api_key: Optional[str] = None,
         timeout: Optional[int] = None,
         reraise: bool = True,
     ):
@@ -51,14 +52,21 @@ class Qwen3VLReranker(BaseNodePostprocessor):
             base_url: Base URL of the rerank API
             model_name: Model name to use for reranking
             top_n: Number of top results to return after reranking
+            api_key: API key for authentication
             timeout: Timeout for API requests in seconds
             reraise: Whether to reraise exceptions on API errors
         """
         super().__init__()
-        self.base_url = base_url or self.base_url
-        self.model_name = model_name or self.model_name
-        self.top_n = top_n or self.top_n
-        self.timeout = timeout or self.timeout
+        if base_url is not None:
+            self.base_url = base_url
+        if model_name is not None:
+            self.model_name = model_name
+        if top_n is not None:
+            self.top_n = top_n
+        if api_key is not None:
+            self.api_key = api_key
+        if timeout is not None:
+            self.timeout = timeout
         self.reraise = reraise
         self._client = HttpxRerankerClient(
             base_url=self.base_url,
@@ -233,11 +241,13 @@ class Qwen3VLReranker(BaseNodePostprocessor):
         except Exception as e:
             logger.error(f"Error calling rerank API: {e}")
             if self.reraise:
-                raise e
+                raise
             return nodes[: self.top_n]
 
         if "results" not in result:
             logger.warning("No results in rerank response")
+            if self.reraise:
+                raise ValueError("Invalid rerank response: missing 'results'")
             return nodes[: self.top_n]
 
         # Build reranked nodes

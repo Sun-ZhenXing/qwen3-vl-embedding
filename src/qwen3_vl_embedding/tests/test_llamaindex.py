@@ -6,6 +6,7 @@ from typing import List
 
 import pytest
 from dotenv import load_dotenv
+from pydantic import HttpUrl
 
 from qwen3_vl_embedding.types import EmbeddingContentPart
 
@@ -270,3 +271,182 @@ async def test_llamaindex_reranker_async(
 
     assert isinstance(reranked_nodes, list)
     assert len(reranked_nodes) <= 2
+
+
+def test_llamaindex_reranker_multimodal_image_nodes(
+    reranker_base_url: str,
+    reranker_model: str,
+    api_key: str,
+) -> None:
+    """Test LlamaIndex reranker with ImageNode (text + image hybrid).
+
+    ImageNode extends TextNode and can carry both text and an image_url,
+    which the reranker converts into a ScoreMultiModalParam automatically.
+    """
+    from llama_index.core.schema import ImageNode, NodeWithScore, QueryBundle, TextNode
+
+    from qwen3_vl_embedding.llama_index import Qwen3VLReranker
+
+    reranker = Qwen3VLReranker(
+        base_url=reranker_base_url,
+        model_name=reranker_model,
+        top_n=2,
+    )
+
+    demo_image = (
+        "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"
+    )
+
+    nodes = [
+        # ImageNode with text + image_url (hybrid multimodal)
+        NodeWithScore(
+            node=ImageNode(
+                text="A woman and her dog enjoying the beach.",
+                image_url=demo_image,
+            ),
+            score=0.5,
+        ),
+        # ImageNode with image_url only (no text)
+        NodeWithScore(
+            node=ImageNode(
+                text="",
+                image_url=demo_image,
+            ),
+            score=0.5,
+        ),
+        # Plain TextNode as baseline
+        NodeWithScore(
+            node=TextNode(text="Python is a popular programming language."),
+            score=0.5,
+        ),
+    ]
+
+    query_bundle = QueryBundle(
+        query_str="Find images about people playing on the beach"
+    )
+    reranked_nodes = reranker._postprocess_nodes(nodes, query_bundle)
+
+    assert len(reranked_nodes) <= 2
+    assert all(isinstance(n, NodeWithScore) for n in reranked_nodes)
+    # Scores should be updated by the reranker
+    for node in reranked_nodes:
+        assert node.score is not None
+        assert isinstance(node.score, float)
+
+
+def test_llamaindex_reranker_mixed_text_and_image(
+    reranker_base_url: str,
+    reranker_model: str,
+    api_key: str,
+) -> None:
+    """Test LlamaIndex reranker with a mix of TextNode and ImageNode.
+
+    Verifies that the reranker correctly handles a heterogeneous list of
+    nodes and returns relevance-sorted results.
+    """
+    from llama_index.core.schema import (
+        ImageNode,
+        MediaResource,
+        Node,
+        NodeWithScore,
+        QueryBundle,
+        TextNode,
+    )
+
+    from qwen3_vl_embedding.llama_index import Qwen3VLReranker
+
+    reranker = Qwen3VLReranker(
+        base_url=reranker_base_url,
+        model_name=reranker_model,
+        top_n=3,
+    )
+
+    demo_image = (
+        "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"
+    )
+
+    nodes = [
+        NodeWithScore(
+            node=TextNode(text="Machine learning is a subset of AI."),
+            score=0.5,
+        ),
+        NodeWithScore(
+            node=ImageNode(
+                text="A dog running on the sand.",
+                image_url=demo_image,
+            ),
+            score=0.5,
+        ),
+        NodeWithScore(
+            node=Node(
+                text_resource=MediaResource(
+                    text="Data science involves analyzing data."
+                ),
+                video_resource=MediaResource(
+                    url=HttpUrl(
+                        "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-Omni/demo/draw.mp4"
+                    )
+                ),
+            ),
+            score=0.5,
+        ),
+        NodeWithScore(
+            node=ImageNode(
+                text="Sunset over the ocean.",
+                image_url=demo_image,
+            ),
+            score=0.5,
+        ),
+    ]
+
+    query_bundle = QueryBundle(query_str="Beach and ocean scenery")
+    reranked_nodes = reranker._postprocess_nodes(nodes, query_bundle)
+
+    assert len(reranked_nodes) <= 3
+    assert all(isinstance(n, NodeWithScore) for n in reranked_nodes)
+    # Each node should have a valid relevance score
+    for node in reranked_nodes:
+        assert node.score is not None
+
+
+async def test_llamaindex_reranker_multimodal_async(
+    reranker_base_url: str,
+    reranker_model: str,
+    api_key: str,
+) -> None:
+    """Test LlamaIndex async reranker with multimodal ImageNode."""
+    from llama_index.core.schema import ImageNode, NodeWithScore, QueryBundle, TextNode
+
+    from qwen3_vl_embedding.llama_index import Qwen3VLReranker
+
+    reranker = Qwen3VLReranker(
+        base_url=reranker_base_url,
+        model_name=reranker_model,
+        top_n=2,
+    )
+
+    demo_image = (
+        "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"
+    )
+
+    nodes = [
+        NodeWithScore(
+            node=ImageNode(
+                text="A woman playing with her dog on a beach.",
+                image_url=demo_image,
+            ),
+            score=0.5,
+        ),
+        NodeWithScore(
+            node=TextNode(text="Python is a programming language."),
+            score=0.5,
+        ),
+    ]
+
+    query_bundle = QueryBundle(query_str="Beach scene with a dog")
+    reranked_nodes = await reranker._apostprocess_nodes(nodes, query_bundle)
+
+    assert isinstance(reranked_nodes, list)
+    assert len(reranked_nodes) <= 2
+    for node in reranked_nodes:
+        assert node.score is not None
