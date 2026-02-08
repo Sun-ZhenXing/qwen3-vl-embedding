@@ -1,4 +1,12 @@
-from typing import Literal, Required, TypedDict
+from __future__ import annotations
+
+import sys
+from typing import Any, List, Literal, Optional, TypedDict
+
+if sys.version_info >= (3, 11):
+    from typing import Required
+else:
+    from typing_extensions import Required
 
 # ! Reference types from OpenAI SDK
 # from openai.types.chat import (
@@ -56,8 +64,33 @@ class ChatCompletionContentPartVideoParam(TypedDict, total=False):
     """The type of the content part."""
 
 
+class ChatCompletionContentPartImageEmbedsParam(TypedDict, total=False):
+    """Addon content part representing image embeds."""
+
+    image_embeds: Optional[str | Any]
+    """A list of base64-encoded image data strings."""
+
+    type: Required[Literal["image_embeds"]]
+    """The type of the content part."""
+
+    uuid: Optional[str]
+    """A unique identifier for the content part."""
+
+
 EmbeddingContentPart = (
     ChatCompletionContentPartVideoParam
     | ChatCompletionContentPartTextParam
     | ChatCompletionContentPartImageParam
+    | ChatCompletionContentPartImageEmbedsParam
 )
+
+
+class ScoreMultiModalParam(TypedDict, total=False):
+    """Parameters for multi-modal scoring."""
+
+    content: List[EmbeddingContentPart]
+
+
+QueryType = str | ScoreMultiModalParam
+Document = str | ScoreMultiModalParam
+DocumentList = Document | List[Document]

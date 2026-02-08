@@ -180,4 +180,4 @@ QWEN3_VL_API_KEY=fake
 
 ## 许可证
 
-MIT License# Python Qwen3 VL
+MIT License

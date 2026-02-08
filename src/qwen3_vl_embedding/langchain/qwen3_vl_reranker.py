@@ -7,7 +7,7 @@ from langchain_core.documents import BaseDocumentCompressor, Document
 from pydantic import ConfigDict, Field, PrivateAttr
 
 from qwen3_vl_embedding.client import HttpxRerankerClient, RerankerResponse
-from qwen3_vl_embedding.types import EmbeddingContentPart
+from qwen3_vl_embedding.types import DocumentList, EmbeddingContentPart
 
 logger = logging.getLogger(__name__)
 
@@ -83,70 +83,96 @@ class Qwen3VLReranker(BaseDocumentCompressor):
             api_key=self.api_key,
         )
 
-    def _prepare_documents_from_langchain(
-        self, documents: Sequence[Document]
-    ) -> List[EmbeddingContentPart]:
-        """Prepare document strings from LangChain documents.
+    def _prepare_documents_from_langchain(self, documents: Sequence[Document]) -> list:
+        """Prepare documents from LangChain documents for the reranker API.
+
+        Each document is converted to either a plain string (text-only) or a
+        ScoreMultiModalParam dict (hybrid multimodal with mixed content types).
 
         Args:
             documents: Sequence of LangChain Document objects
 
         Returns:
-            List of document strings (JSON serialized for multimodal content)
+            List of documents, each being a str or ScoreMultiModalParam
         """
-        # TODO: Implement multimodal content handling
-        ...
-        # import json
+        from qwen3_vl_embedding.client import get_image_url
 
-        # doc_strings: List[str] = []
-        # for doc in documents:
-        #     # Check if document has multimodal content in metadata
-        #     if "image_url" in doc.metadata:
-        #         # Create multimodal content for images
-        #         doc_content = {
-        #             "type": "image_url",
-        #             "image_url": {"url": doc.metadata["image_url"]},
-        #         }
-        #         doc_strings.append(json.dumps(doc_content))
-        #     elif "image_path" in doc.metadata:
-        #         # Create multimodal content for local images
-        #         doc_content = {
-        #             "type": "image_url",
-        #             "image_url": {"url": f"file://{doc.metadata['image_path']}"},
-        #         }
-        #         doc_strings.append(json.dumps(doc_content))
-        #     elif "video_url" in doc.metadata:
-        #         # Create multimodal content for videos
-        #         doc_content = {
-        #             "type": "video_url",
-        #             "video_url": {"url": doc.metadata["video_url"]},
-        #         }
-        #         doc_strings.append(json.dumps(doc_content))
-        #     elif "video_path" in doc.metadata:
-        #         # Create multimodal content for local videos
-        #         doc_content = {
-        #             "type": "video_url",
-        #             "video_url": {"url": f"file://{doc.metadata['video_path']}"},
-        #         }
-        #         doc_strings.append(json.dumps(doc_content))
-        #     elif "multimodal_content" in doc.metadata:
-        #         # Use predefined multimodal content
-        #         doc_strings.append(json.dumps(doc.metadata["multimodal_content"]))
-        #     else:
-        #         # Use plain text content
-        #         doc_strings.append(doc.page_content)
-        # return doc_strings
+        result: list = []
+        for doc in documents:
+            parts: List[EmbeddingContentPart] = []
+
+            # Check for predefined multimodal content first
+            if "multimodal_content" in doc.metadata:
+                content = doc.metadata["multimodal_content"]
+                if isinstance(content, list):
+                    parts.extend(content)
+                else:
+                    parts.append(content)
+            else:
+                # Add text content if present
+                if doc.page_content:
+                    parts.append({"type": "text", "text": doc.page_content})
+
+                # Add image content if present (non-exclusive with text)
+                if "image_url" in doc.metadata:
+                    parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": doc.metadata["image_url"]},
+                        }
+                    )
+                elif "image_path" in doc.metadata:
+                    parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": get_image_url(path=doc.metadata["image_path"])
+                            },
+                        }
+                    )
+
+                # Add video content if present (non-exclusive with text/image)
+                if "video_url" in doc.metadata:
+                    parts.append(
+                        {
+                            "type": "video_url",
+                            "video_url": {"url": doc.metadata["video_url"]},
+                        }
+                    )
+                elif "video_path" in doc.metadata:
+                    parts.append(
+                        {
+                            "type": "video_url",
+                            "video_url": {
+                                "url": f"file://{doc.metadata['video_path']}"
+                            },
+                        }
+                    )
+
+            # Determine document type for the reranker API
+            if len(parts) == 1 and parts[0].get("type") == "text":
+                # Text-only document: use plain string
+                text_part = parts[0]
+                result.append(text_part["text"])  # type: ignore[typeddict-item]
+            elif parts:
+                # Multimodal or hybrid document: wrap in ScoreMultiModalParam
+                result.append({"content": parts})
+            else:
+                # Fallback: empty text
+                result.append(doc.page_content or "")
+
+        return result
 
     def _rerank_documents(
         self,
         query: str,
-        documents: List[EmbeddingContentPart],
+        documents: DocumentList,
     ) -> RerankerResponse:
         """Rerank documents based on query relevance.
 
         Args:
             query: Query string
-            documents: List of document strings
+            documents: List of documents (str or ScoreMultiModalParam)
 
         Returns:
             Reranker response
@@ -162,7 +188,7 @@ class Qwen3VLReranker(BaseDocumentCompressor):
     async def _arerank_documents(
         self,
         query: str,
-        documents: List[EmbeddingContentPart],
+        documents: DocumentList,
     ) -> RerankerResponse:
         """Async version of _rerank_documents."""
         return await asyncio.to_thread(
@@ -190,14 +216,14 @@ class Qwen3VLReranker(BaseDocumentCompressor):
         if not documents:
             return []
 
-        # Prepare documents
-        doc_strings = self._prepare_documents_from_langchain(documents)
+        # Prepare documents for reranker API
+        prepared_docs = self._prepare_documents_from_langchain(documents)
 
         try:
             # Call reranker API
             result = self._rerank_documents(
                 query=query,
-                documents=doc_strings,
+                documents=prepared_docs,
             )
         except Exception as e:
             logger.error(f"Error calling rerank API: {e}")

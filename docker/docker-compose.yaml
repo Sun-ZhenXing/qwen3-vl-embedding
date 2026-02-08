@@ -8,7 +8,7 @@ x-defaults: &defaults
 
 x-vllm: &vllm
   <<: *defaults
-  image: ${GLOBAL_REGISTRY:-}vllm/vllm-openai:${VLLM_VERSION:-v0.15.0}
+  image: ${GLOBAL_REGISTRY:-}vllm/vllm-openai:${VLLM_VERSION:-v0.15.1}
   volumes:
     - vllm_models:/root/.cache/huggingface
     - ./models:/data/models
@@ -20,7 +20,7 @@ x-vllm: &vllm
     resources:
       limits:
         cpus: ${VLLM_CPU_LIMIT:-4.0}
-        memory: ${VLLM_MEMORY_LIMIT:-8G}
+        memory: ${VLLM_MEMORY_LIMIT:-16G}
       reservations:
         cpus: ${VLLM_CPU_RESERVATION:-2.0}
         memory: ${VLLM_MEMORY_RESERVATION:-4G}
@@ -49,9 +49,9 @@ services:
       --served-model-name Qwen3-VL-Embedding-2B
       --host 0.0.0.0
       --port 8000
-      --gpu-memory-utilization 0.3
+      --gpu-memory-utilization ${VLLM_EMBEDDING_GPU_MEMORY_UTILIZATION:-0.3}
       --runner pooling
-      --max-model-len 8192
+      --max-model-len ${VLLM_EMBEDDING_MAX_MODEL_LEN:-4096}
 
   vllm-qwen3-vl-reranker:
     <<: *vllm
@@ -67,9 +67,9 @@ services:
       --served-model-name Qwen3-VL-Reranker-2B
       --host 0.0.0.0
       --port 8000
-      --gpu-memory-utilization 0.3
+      --gpu-memory-utilization ${VLLM_RERANKER_GPU_MEMORY_UTILIZATION:-0.3}
       --runner pooling
-      --max-model-len 4096
+      --max-model-len ${VLLM_RERANKER_MAX_MODEL_LEN:-4096}
       --hf_overrides '{"architectures":["Qwen3VLForSequenceClassification"],"classifier_from_token":["no","yes"],"is_original_qwen3_reranker": true}'
 
 volumes:
