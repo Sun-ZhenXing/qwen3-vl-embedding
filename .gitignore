@@ -1,3 +1,16 @@
+# Skills
+.codebuddy/
+.agent/
+.agents/
+.claude/
+.cursor/
+.gemini/
+.github/skills/
+.opencode/
+.qoder/
+.qwen/
+.trae/
+
 # Environment files
 .env
 .env.*
