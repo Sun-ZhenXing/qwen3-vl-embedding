@@ -1,12 +1,13 @@
 # Qwen3 VL Embedding
 
-一个面向 Qwen3 VL 的 Python 集成库，提供 HTTPx 客户端以及 LlamaIndex / LangChain 的嵌入与重排序适配。
+一个面向 Qwen3 VL 的 Python 集成库，提供 HTTPx 客户端以及 LlamaIndex / LangChain 的嵌入与重排序适配。同时支持阿里云百炼（DashScope）官方 API。
 
 ## 功能概览
 
 - **HTTPx 客户端**：OpenAI 风格的 `/embeddings` 与 `/rerank` 端点访问
-- **LlamaIndex 集成**：`Qwen3VLEmbedding`、`Qwen3VLReranker`
-- **LangChain 集成**：`Qwen3VLEmbeddings`、`Qwen3VLReranker`
+- **阿里云 API 客户端**：`AliyunEmbeddingClient`，支持多模态融合向量
+- **LlamaIndex 集成**：`Qwen3VLEmbedding`、`Qwen3VLReranker`、`AliyunEmbedding`
+- **LangChain 集成**：`Qwen3VLEmbeddings`、`Qwen3VLReranker`、`AliyunEmbeddings`
 - **多模态嵌入**：支持文本 / 图片 / 视频内容的混合输入（基于聊天式 embeddings 请求）
 - **Docker 部署**：提供 docker-compose 一键部署 vLLM 推理服务
 
@@ -28,7 +29,102 @@ pip install qwen3-vl-embedding[cli]
 
 ## 快速开始
 
-### LlamaIndex
+### 阿里云 DashScope API（推荐）
+
+使用阿里云百炼官方 API，无需本地部署模型：
+
+```python
+from qwen3_vl_embedding import AliyunEmbeddingClient
+
+# 初始化客户端（从环境变量 DASHSCOPE_API_KEY 读取 API Key）
+client = AliyunEmbeddingClient()
+
+# 或显式指定 API Key 和参数
+client = AliyunEmbeddingClient(
+    api_key="sk-xxx",
+    model_name="qwen3-vl-embedding",  # 默认模型
+    region="cn",  # 或 "sg"（新加坡）
+    timeout=60.0,
+)
+
+# 文本嵌入
+embedding = client.embed_fusion(text="Hello world")
+
+# 图片嵌入
+embedding = client.embed_fusion(image="https://example.com/image.jpg")
+
+# 文本+图片融合嵌入
+embedding = client.embed_fusion(
+    text="A beautiful sunset",
+    image="https://example.com/sunset.jpg",
+    dimension=1024,  # 可选：自定义维度
+)
+
+# 多模态融合（文本+图片+视频）
+embedding = client.embed_fusion(
+    text="Tutorial video",
+    image="https://example.com/thumbnail.jpg",
+    video="https://example.com/video.mp4",
+)
+```
+
+#### LangChain 集成
+
+```python
+from qwen3_vl_embedding.langchain import AliyunEmbeddings
+
+embeddings = AliyunEmbeddings(
+    api_key="sk-xxx",  # 或设置 DASHSCOPE_API_KEY 环境变量
+    model="qwen3-vl-embedding",
+    region="cn",
+    dimension=1024,  # 可选
+)
+
+# 文本嵌入
+doc_embeddings = embeddings.embed_documents(["Doc 1", "Doc 2"])
+query_embedding = embeddings.embed_query("Query")
+
+# 图片嵌入
+image_embedding = embeddings.embed_image("https://example.com/image.jpg")
+
+# 多模态融合
+fusion_embedding = embeddings.embed_fusion(
+    text="Describe this",
+    image="https://example.com/image.jpg",
+)
+```
+
+#### LlamaIndex 集成
+
+```python
+from qwen3_vl_embedding.llama_index import AliyunEmbedding
+
+embedding = AliyunEmbedding(
+    api_key="sk-xxx",  # 或设置 DASHSCOPE_API_KEY 环境变量
+    model_name="qwen3-vl-embedding",
+    region="cn",
+    dimension=1024,  # 可选
+)
+
+# 文本嵌入
+text_embedding = embedding.get_text_embedding("Hello")
+query_embedding = embedding.get_query_embedding("Query")
+
+# 图片嵌入
+image_embedding = embedding.get_image_embedding("https://example.com/image.jpg")
+
+# 多模态融合
+fusion_embedding = embedding.get_fusion_embedding(
+    text="Describe this",
+    image="https://example.com/image.jpg",
+)
+
+# 异步支持
+async def get_embedding():
+    embedding = await embedding.aget_text_embedding("Hello")
+```
+
+### 本地模型部署（LlamaIndex）
 
 ```python
 from qwen3_vl_embedding.llama_index import Qwen3VLEmbedding, Qwen3VLReranker
@@ -140,6 +236,38 @@ rerank_response = rerank_client.rerank(
 
 ## 配置参数
 
+### AliyunEmbeddingClient
+
+| 参数 | 类型 | 默认值 | 说明 |
+| ------ | ------ | -------- | ------ |
+| `api_key` | `str` | `None` | DashScope API Key（也可通过 `DASHSCOPE_API_KEY` 环境变量设置） |
+| `model_name` | `str` | `qwen3-vl-embedding` | 模型名称 |
+| `region` | `str` | `cn` | API 地域：`cn`（北京）或 `sg`（新加坡） |
+| `timeout` | `float` | `60.0` | 请求超时（秒） |
+
+**支持的维度**：256, 512, 768, 1024, 1536, 2048, 2560（默认）
+
+### AliyunEmbeddings（LangChain）
+
+| 参数 | 类型 | 默认值 | 说明 |
+| ------ | ------ | -------- | ------ |
+| `api_key` | `str` | `None` | DashScope API Key |
+| `model` | `str` | `qwen3-vl-embedding` | 模型名称 |
+| `region` | `str` | `cn` | API 地域 |
+| `dimension` | `int` | `None` | 嵌入维度 |
+| `timeout` | `float` | `60.0` | 请求超时（秒） |
+
+### AliyunEmbedding（LlamaIndex）
+
+| 参数 | 类型 | 默认值 | 说明 |
+| ------ | ------ | -------- | ------ |
+| `api_key` | `str` | `None` | DashScope API Key |
+| `model_name` | `str` | `qwen3-vl-embedding` | 模型名称 |
+| `region` | `str` | `cn` | API 地域 |
+| `dimension` | `int` | `None` | 嵌入维度 |
+| `embed_batch_size` | `int` | `10` | 批处理大小 |
+| `timeout` | `float` | `60.0` | 请求超时（秒） |
+
 ### Qwen3VLEmbedding（LlamaIndex）
 
 | 参数 | 类型 | 默认值 | 说明 |
@@ -212,11 +340,30 @@ uv run pytest
 测试用 `.env` 示例（放置于 `src/qwen3_vl_embedding/tests/.env`）：
 
 ```bash
+# 本地模型测试配置
 QWEN3_VL_EMBEDDING_BASE_URL=http://localhost:8001/v1
 QWEN3_VL_EMBEDDING_MODEL=Qwen3-VL-Embedding-2B
 QWEN3_VL_RERANKER_BASE_URL=http://localhost:8002/v1
 QWEN3_VL_RERANKER_MODEL=Qwen3-VL-Reranker-2B
 QWEN3_VL_API_KEY=fake
+
+# 阿里云 API 测试配置（可选，用于运行真实 API 集成测试）
+DASHSCOPE_API_KEY=sk-xxx
+```
+
+### 运行真实 API 集成测试
+
+默认情况下，真实 API 集成测试会被跳过。要运行这些测试，请设置 `DASHSCOPE_API_KEY` 环境变量：
+
+```bash
+# 设置环境变量
+export DASHSCOPE_API_KEY=sk-your-real-api-key
+
+# 运行所有测试（包括真实 API 测试）
+uv run pytest src/qwen3_vl_embedding/tests/ -k "aliyun" -v
+
+# 仅运行真实 API 集成测试
+uv run pytest src/qwen3_vl_embedding/tests/ -k "Real" -v
 ```
 
 ## 许可证
